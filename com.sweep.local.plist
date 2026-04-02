@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.newsweep.local</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/raphael/PycharmProjects/newsweep/.venv/bin/python</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>sweep_local.server:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8741</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/raphael/PycharmProjects/newsweep</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/raphael/PycharmProjects/newsweep/logs/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/raphael/PycharmProjects/newsweep/logs/stderr.log</string>
+</dict>
+</plist>

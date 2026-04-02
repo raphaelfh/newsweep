@@ -1,0 +1,7 @@
+# Tabby configuration for newsweep local backend
+# Copy this to ~/.tabby/config.toml (or merge with existing config)
+
+[model.completion.http]
+kind = "openai/completion"
+api_endpoint = "http://localhost:8741/v1"
+model_name = "sweepai/sweep-next-edit-v2-7B"

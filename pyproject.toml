@@ -1,0 +1,14 @@
+[project]
+name = "newsweep"
+version = "0.1.0"
+description = "Local next-edit autocomplete server for PyCharm via Tabby (MLX + Apple Silicon)"
+requires-python = ">=3.12"
+dependencies = [
+    "mlx-lm>=0.31.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "watchdog>=4.0.0",
+]
+
+[project.scripts]
+newsweep = "sweep_local.server:main"
