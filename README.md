@@ -54,7 +54,80 @@ newsweep
 
 The server runs on `http://localhost:8741`.
 
-5. Configure [Tabby plugin](https://tabby.tabbyml.com/) in your IDE to point to `http://localhost:8741`.
+## macOS setup (auto-start with launchd)
+
+To have newsweep start automatically at login, install the included launchd plist:
+
+1. Edit `com.sweep.local.plist` and update the paths to match your environment (Python path, working directory, log paths).
+
+2. Copy it to `~/Library/LaunchAgents/`:
+
+```bash
+cp com.sweep.local.plist ~/Library/LaunchAgents/com.newsweep.local.plist
+```
+
+3. Load the service:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.newsweep.local.plist
+```
+
+4. Verify it's running:
+
+```bash
+curl http://localhost:8741/v1/health
+```
+
+To stop or restart:
+
+```bash
+# Stop
+launchctl unload ~/Library/LaunchAgents/com.newsweep.local.plist
+
+# Restart
+launchctl unload ~/Library/LaunchAgents/com.newsweep.local.plist
+launchctl load ~/Library/LaunchAgents/com.newsweep.local.plist
+```
+
+Logs are written to `logs/stdout.log` and `logs/stderr.log`.
+
+## JetBrains IDE setup (PyCharm, IntelliJ, WebStorm, etc.)
+
+### Step 1: Install the Tabby plugin
+
+1. Open your JetBrains IDE.
+2. Go to **Settings** > **Plugins** > **Marketplace**.
+3. Search for **Tabby** and click **Install**.
+4. Restart the IDE.
+
+### Step 2: Configure Tabby to use newsweep
+
+1. Copy the included Tabby config to your home directory:
+
+```bash
+mkdir -p ~/.tabby
+cp tabby_config_example.toml ~/.tabby/config.toml
+```
+
+Or manually create/edit `~/.tabby/config.toml` with:
+
+```toml
+[model.completion.http]
+kind = "openai/completion"
+api_endpoint = "http://localhost:8741/v1"
+model_name = "sweepai/sweep-next-edit-v2-7B"
+```
+
+2. In the IDE, go to **Settings** > **Tools** > **Tabby**.
+3. Set the **API Endpoint** to `http://localhost:8741`.
+4. Leave the API token field empty (newsweep doesn't require authentication).
+5. Click **Apply**.
+
+### Step 3: Verify
+
+1. Make sure the newsweep server is running (`./start.sh` or via launchd).
+2. Open a source file in the IDE and start typing -- you should see completions appear.
+3. Check the server stats at `http://localhost:8741/v1/stats` to confirm requests are being processed.
 
 ## API
 

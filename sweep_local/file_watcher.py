@@ -16,7 +16,6 @@ from watchdog.observers import Observer
 
 from sweep_local.config import MAX_DIFFS_PER_FILE
 
-
 @dataclass
 class FileDiff:
     file_path: str
