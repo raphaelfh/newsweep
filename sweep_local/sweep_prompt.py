@@ -8,6 +8,8 @@ from dataclasses import dataclass
 PROMPT_TEMPLATE = """<|file_sep|>{file_path}
 {initial_file}{retrieval_results}
 {recent_changes}
+<|file_sep|>original/{file_path}:{start_line}:{end_line}
+{prev_section}
 <|file_sep|>current/{file_path}:{start_line}:{end_line}
 {code_block}
 <|file_sep|>updated/{file_path}:{start_line}:{end_line}
@@ -19,10 +21,24 @@ original:
 updated:
 {new_code}"""
 
-STOP_TOKENS = ["<|endoftext|>", "<|file_sep|>"]
+STOP_TOKENS = [
+    "<|endoftext|>",
+    "<|file_sep|>",
+    "<|fim_prefix|>",
+    "<|fim_middle|>",
+    "<|fim_suffix|>",
+    "<|fim_pad|>",
+    "<|repo_name|>",
+    "<|im_start|>",
+    "<|im_end|>",
+]
 
 # Context window around cursor (lines above + below)
 NUM_CONTEXT_LINES_HALF = 50
+
+# Snap context window to chunks of this size so small cursor
+# movements don't shift the window and invalidate the KV cache.
+CONTEXT_CHUNK_SIZE = 40
 
 
 @dataclass
@@ -139,11 +155,22 @@ def build_prompt(
         + code_block[relative_cursor:]
     )
 
+    # prev_section = code_block without cursor (the "original" version)
+    prev_section = code_block
+
     prefill = compute_prefill(code_block, relative_cursor, changes_above_cursor)
 
-    # Broad context (~100 lines around cursor, excluding the code block to avoid duplication)
-    context_start = max(0, cursor_line - NUM_CONTEXT_LINES_HALF)
-    context_end = min(len(lines), cursor_line + NUM_CONTEXT_LINES_HALF)
+    # Broad context around cursor — reduce when PSI retrieval chunks provide
+    # semantic definitions, since the broad window is less critical then.
+    context_half = NUM_CONTEXT_LINES_HALF
+    if retrieval_chunks:
+        context_half = max(25, NUM_CONTEXT_LINES_HALF - 25)
+    # Snap to CONTEXT_CHUNK_SIZE boundaries so small cursor movements
+    # don't shift the window and invalidate the KV cache prefix.
+    chunk = CONTEXT_CHUNK_SIZE
+    anchor = (cursor_line // chunk) * chunk
+    context_start = max(0, anchor - context_half)
+    context_end = min(len(lines), anchor + chunk + context_half)
     context_before = "".join(lines[context_start:block_start])
     context_after = "".join(lines[block_end:context_end])
     initial_file = context_before + context_after
@@ -162,6 +189,7 @@ def build_prompt(
         initial_file=initial_file,
         retrieval_results=retrieval_results,
         recent_changes=recent_changes,
+        prev_section=prev_section,
         code_block=code_block_with_cursor,
         start_line=start_line,
         end_line=end_line,
@@ -189,3 +217,4 @@ def format_diff(
         old_code=old_code,
         new_code=new_code,
     )
+
