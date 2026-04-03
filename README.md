@@ -68,13 +68,49 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-3. Download the models into the `models/` directory:
+3. Download and convert the models.
 
-```bash
-mkdir -p models
-# Download sweep-next-edit-v2-7B (MLX 4-bit) and qwen2.5-0.5b (MLX 4-bit)
-# Place them in models/sweep-next-edit-v2-7B-4bit and models/qwen2.5-0.5b-4bit
-```
+   newsweep requires two models, both converted to MLX 4-bit format. The `mlx_lm` CLI (installed with the project dependencies in step 2) handles downloading from Hugging Face and quantizing in one command.
+
+   **Main model** -- [sweep-next-edit-v2-7B](https://huggingface.co/sweepai/sweep-next-edit-v2-7B), the next-edit prediction model by SweepAI. This is the only project-specific model; everything else is standard tooling.
+
+   ```bash
+   mlx_lm.convert \
+     --hf-path sweepai/sweep-next-edit-v2-7B \
+     -q --q-bits 4 \
+     --mlx-path models/sweep-next-edit-v2-7B-4bit
+   ```
+
+   This downloads the original model weights from Hugging Face (~14 GB), quantizes them to 4-bit precision (~4 GB), and saves the result in MLX format to `models/sweep-next-edit-v2-7B-4bit/`.
+
+   **Draft model** -- [Qwen2.5-0.5B](https://huggingface.co/Qwen/Qwen2.5-0.5B), a small general-purpose language model by the Qwen team. It's used as the "draft" model for [speculative decoding](https://arxiv.org/abs/2302.01318) -- it proposes candidate tokens that the main model verifies in batch, which speeds up generation by ~1.2x. This model is not specific to newsweep; any small LM would work, but Qwen2.5-0.5B is a good balance of speed and quality.
+
+   ```bash
+   mlx_lm.convert \
+     --hf-path Qwen/Qwen2.5-0.5B \
+     -q --q-bits 4 \
+     --mlx-path models/qwen2.5-0.5b-4bit
+   ```
+
+   After both commands finish, your `models/` directory should contain:
+
+   ```
+   models/
+     sweep-next-edit-v2-7B-4bit/
+       config.json
+       model.safetensors
+       model.safetensors.index.json
+       tokenizer.json
+       tokenizer_config.json
+     qwen2.5-0.5b-4bit/
+       config.json
+       model.safetensors
+       model.safetensors.index.json
+       tokenizer.json
+       tokenizer_config.json
+   ```
+
+   > **What `mlx_lm.convert` does:** It downloads the original PyTorch/safetensors weights from Hugging Face, converts them to Apple's [MLX](https://github.com/ml-explore/mlx) tensor format (optimized for Apple Silicon unified memory), and applies 4-bit quantization to reduce memory usage. The converted models are self-contained -- each folder has the weights, tokenizer, and config needed to run inference.
 
 4. Start the server:
 
