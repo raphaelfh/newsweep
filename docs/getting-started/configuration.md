@@ -36,6 +36,18 @@ Speculative decoding generates multiple tokens per forward pass by *proposing* c
 
 **N-gram vs. draft model**: N-gram speculation is the default because it needs no extra model and is faster for code rewrites where prompts contain repetitive patterns. The draft model (Qwen2.5-0.5B) is a fallback for cases where prompt tokens don't provide good n-gram matches.
 
+## Repetition penalty
+
+Prevents the model from getting stuck in repetitive output loops (e.g., generating the same line over and over). Uses MLX's built-in repetition penalty logits processor.
+
+| Setting | Default | Description |
+|---|---|---|
+| `REPETITION_PENALTY` | `1.2` | Penalty factor for already-generated tokens (1.0 = disabled) |
+| `REPETITION_CONTEXT_SIZE` | `64` | How many recent tokens the penalty considers |
+| `CYCLE_DETECT_WINDOW` | `12` | Max cycle length for the safety-net cycle detector |
+
+The penalty reduces the probability of tokens that have already appeared in the recent context. Values above 1.0 discourage repetition; higher values are more aggressive. The cycle detector is a fallback that force-stops generation if the same token sequence repeats back-to-back, trimming the duplicate from the output.
+
 ## Token healing
 
 Token healing fixes broken completions caused by partial-word tokenization boundaries. See [Token Healing](../deep-dives/token-healing.md).

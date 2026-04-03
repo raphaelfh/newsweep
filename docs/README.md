@@ -43,3 +43,12 @@ Endpoint reference for integration.
 | Document | Description |
 |---|---|
 | [Endpoints](api/endpoints.md) | Complete API reference with request/response schemas |
+
+### [Benchmarks](benchmarks/)
+
+Performance and quality measurement.
+
+| Document | Description |
+|---|---|
+| [Latency Benchmark](benchmarks/latency.md) | Component and HTTP latency profiling |
+| [Quality Benchmark](benchmarks/quality.md) | Prediction accuracy against realistic editing scenarios |

@@ -155,8 +155,17 @@ def build_prompt(
         + code_block[relative_cursor:]
     )
 
-    # prev_section = code_block without cursor (the "original" version)
-    prev_section = code_block
+    # prev_section = the "original" version the model compares against.
+    # When there are no recent_changes (no diff between original and current),
+    # truncate prev_section at the cursor line so the model sees a visible
+    # diff — the cursor line and everything after it appears "new" in the
+    # current section, signalling that the developer is inserting content.
+    # This prevents the model from predicting "no edit" for pure insertions.
+    if not recent_changes:
+        prefill_end = len(compute_prefill(code_block, relative_cursor, changes_above_cursor))
+        prev_section = code_block[:prefill_end]
+    else:
+        prev_section = code_block
 
     prefill = compute_prefill(code_block, relative_cursor, changes_above_cursor)
 

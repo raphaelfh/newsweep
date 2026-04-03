@@ -11,14 +11,19 @@ HOST = "0.0.0.0"
 PORT = 8741
 
 # Prompt construction
-NUM_LINES_BEFORE = 7     # code block lines before cursor
-NUM_LINES_AFTER = 7      # code block lines after cursor
-MAX_NEW_TOKENS = 64      # autocomplete completions are short; caps worst-case latency
+NUM_LINES_BEFORE = 12    # code block lines before cursor
+NUM_LINES_AFTER = 12     # code block lines after cursor
+MAX_NEW_TOKENS = 128     # allow longer completions for block/method scenarios
 
 # Speculative decoding
 NUM_DRAFT_TOKENS = 2     # tokens drafted per step (lower = less waste on rejection)
 USE_NGRAM_SPECULATION = True  # use n-gram lookup instead of draft model
 NGRAM_N = 3              # n-gram size for lookup (match last N-1 tokens)
+
+# Repetition penalty
+REPETITION_PENALTY = 1.2        # penalise already-generated tokens (1.0 = off)
+REPETITION_CONTEXT_SIZE = 64    # how many past tokens the penalty looks at
+CYCLE_DETECT_WINDOW = 12        # force-stop when last 2*W tokens are a repeated cycle
 
 # Token healing
 ENABLE_TOKEN_HEALING = True

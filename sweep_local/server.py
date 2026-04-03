@@ -30,10 +30,11 @@ from fastapi.responses import PlainTextResponse
 from mlx_lm import load
 from mlx_lm.generate import generate_step, speculative_generate_step
 from mlx_lm.models.cache import KVCache, make_prompt_cache
-from mlx_lm.sample_utils import make_sampler
+from mlx_lm.sample_utils import make_repetition_penalty, make_sampler
 from pydantic import BaseModel, Field
 
 from sweep_local.config import (
+    CYCLE_DETECT_WINDOW,
     DRAFT_MODEL_PATH,
     EARLY_STOP_MATCH_TOKENS,
     ENABLE_TOKEN_HEALING,
@@ -51,6 +52,8 @@ from sweep_local.config import (
     NUM_LINES_BEFORE,
     PORT,
     PROJECT_ROOT,
+    REPETITION_CONTEXT_SIZE,
+    REPETITION_PENALTY,
     USE_NGRAM_SPECULATION,
 )
 from sweep_local.file_watcher import diff_store, start_watcher
@@ -58,6 +61,7 @@ from sweep_local.sweep_prompt import (
     STOP_TOKENS,
     FileChunk,
     build_prompt,
+    compute_prefill,
     format_diff,
     is_pure_insertion_above_cursor,
 )
@@ -76,6 +80,7 @@ model = None
 draft_model = None
 tokenizer = None
 sampler = None
+repetition_processor = None
 stop_ids: set[int] = set()
 vocab_trie: VocabTrie | None = None
 observer = None
@@ -216,11 +221,15 @@ metrics = Metrics()
 
 
 def load_model():
-    global model, draft_model, tokenizer, sampler, stop_ids, vocab_trie
+    global model, draft_model, tokenizer, sampler, repetition_processor, stop_ids, vocab_trie
     logger.info(f"Loading {MODEL_PATH} (MLX 4-bit)...")
     t0 = time.time()
     model, tokenizer = load(MODEL_PATH)
     sampler = make_sampler(temp=0.0)
+    if REPETITION_PENALTY > 1.0:
+        repetition_processor = make_repetition_penalty(
+            REPETITION_PENALTY, context_size=REPETITION_CONTEXT_SIZE,
+        )
     # Pre-compute stop token IDs once
     vocab = tokenizer.get_vocab()
     stop_ids = {
@@ -536,6 +545,7 @@ def generate(
         cancelled = False
         hit_stop = False
         early_stopped = False
+        cycle_stopped = False
         draft_accepted = 0
         draft_total = 0
         fwd_passes = 0
@@ -582,14 +592,21 @@ def generate(
                 # that we stop building mx.array(all_tokens) each iteration.
                 healing_steps_left = MAX_HEALING_TOKENS if healing_processor else 0
                 while tokens_remaining > 0:
-                    # Apply healing processor
+                    # Apply logits processors
+                    # step_logits is kept as 2D (1, vocab_size) throughout.
+                    # healing_processor expects 1D; repetition_processor expects 2D.
                     step_logits = logits[0, -1:, :]
+                    tok_array = mx.array(all_tokens)
                     if healing_steps_left > 0:
                         step_logits = healing_processor(
-                            mx.array(all_tokens), step_logits.squeeze(0)
+                            tok_array, step_logits.squeeze(0)
                         )
                         step_logits = step_logits[None, :]
                         healing_steps_left -= 1
+                    if repetition_processor is not None:
+                        step_logits = repetition_processor(
+                            tok_array, step_logits
+                        )
 
                     # Sample base token
                     tid = sampler(step_logits).item()
@@ -619,6 +636,11 @@ def generate(
                     else:
                         suffix_match_count = 0
                         suffix_pos = 0
+
+                    # Cycle detection safety net
+                    if _has_token_cycle(generated):
+                        cycle_stopped = True
+                        break
 
                     # Try n-gram draft for next tokens
                     draft = ngram_draft_tokens(
@@ -689,7 +711,7 @@ def generate(
 
                         draft_accepted += accepted
 
-                        if hit_stop or early_stopped or _request_seq > seq:
+                        if hit_stop or early_stopped or cycle_stopped or _request_seq > seq:
                             if _request_seq > seq:
                                 cancelled = True
                             break
@@ -712,7 +734,11 @@ def generate(
 
             elif draft_model is not None:
                 # --- Draft-model speculative decoding (original path) ---
-                lp = [healing_processor] if healing_processor else None
+                lp = []
+                if healing_processor:
+                    lp.append(healing_processor)
+                if repetition_processor is not None:
+                    lp.append(repetition_processor)
                 for token_id, _, from_draft in speculative_generate_step(
                     prompt_array,
                     model,
@@ -721,7 +747,7 @@ def generate(
                     sampler=sampler,
                     prompt_cache=cache,
                     num_draft_tokens=NUM_DRAFT_TOKENS,
-                    logits_processors=lp,
+                    logits_processors=lp or None,
                 ):
                     tid = token_id if isinstance(token_id, int) else token_id.item()
                     draft_total += 1
@@ -749,16 +775,24 @@ def generate(
                     else:
                         suffix_match_count = 0
                         suffix_pos = 0
+
+                    if _has_token_cycle(generated):
+                        cycle_stopped = True
+                        break
             else:
                 # --- Standard generation (no speculation) ---
-                lp = [healing_processor] if healing_processor else None
+                lp = []
+                if healing_processor:
+                    lp.append(healing_processor)
+                if repetition_processor is not None:
+                    lp.append(repetition_processor)
                 for token_id, _ in generate_step(
                     prompt_array,
                     model,
                     max_tokens=max_tokens,
                     sampler=sampler,
                     prompt_cache=cache,
-                    logits_processors=lp,
+                    logits_processors=lp or None,
                 ):
                     tid = token_id if isinstance(token_id, int) else token_id.item()
                     if _request_seq > seq:
@@ -784,8 +818,16 @@ def generate(
                         suffix_match_count = 0
                         suffix_pos = 0
 
+                    if _has_token_cycle(generated):
+                        cycle_stopped = True
+                        break
+
         except Exception:
-            logger.exception("MLX generation failed")
+            mode = "ngram" if use_ngram else ("draft" if draft_model else "standard")
+            logger.exception(
+                "MLX generation failed: mode=%s prompt_tokens=%d generated=%d",
+                mode, len(tokens), len(generated),
+            )
             _last_tokens = None
             _last_cache = None
             _last_ngram_index = None
@@ -794,10 +836,39 @@ def generate(
         timings["generation"] = time.perf_counter() - t_gen
         elapsed = time.time() - t0
 
+        # Diagnostic: log generation exit reason
+        if not generated:
+            exit_reason = (
+                "stop_token_first" if hit_stop
+                else "cancelled" if cancelled
+                else "cycle" if cycle_stopped
+                else "max_tokens" if not hit_stop
+                else "unknown"
+            )
+            logger.warning(
+                "Empty generation: reason=%s prompt_len=%d tokens",
+                exit_reason, len(tokens),
+            )
+
+        # Trim the repeated cycle from the output, but preserve at least the
+        # first non-cyclic tokens so the result is never empty.
+        if cycle_stopped and generated:
+            pre_trim = len(generated)
+            for w in range(4, CYCLE_DETECT_WINDOW + 1):
+                if len(generated) >= 2 * w and generated[-2 * w:-w] == generated[-w:]:
+                    trimmed = generated[:-w]
+                    if trimmed:  # only trim if something remains
+                        generated = trimmed
+                    break
+            logger.info(
+                "Cycle detected — trimmed %d tokens (%d → %d)",
+                pre_trim - len(generated), pre_trim, len(generated),
+            )
+
         # --- Save cache for next request ---
         # Don't save cache after early stop (suffix tokens weren't model-generated)
-        # or after cancellation (incomplete generation).
-        if not cancelled and not early_stopped:
+        # or after cancellation / cycle stop (incomplete generation).
+        if not cancelled and not early_stopped and not cycle_stopped:
             trim_gen = len(generated) + (1 if hit_stop else 0)
             if trim_gen > 0:
                 for layer in cache:
@@ -857,6 +928,24 @@ def _check_early_stop(token_id: int, suffix_tokens: list[int], pos: int) -> bool
     if pos >= len(suffix_tokens):
         return False
     return token_id == suffix_tokens[pos]
+
+
+def _has_token_cycle(generated: list[int], min_w: int = 4, max_w: int | None = None) -> bool:
+    """Detect if the tail of `generated` is a repeating cycle.
+
+    Returns True if the last 2*W tokens consist of the same W-length
+    pattern repeated twice, for any W in [min_w, max_w].
+    """
+    if max_w is None:
+        max_w = CYCLE_DETECT_WINDOW
+    n = len(generated)
+    for w in range(min_w, max_w + 1):
+        if n < 2 * w:
+            continue
+        tail = generated[-2 * w:]
+        if tail[:w] == tail[w:]:
+            return True
+    return False
 
 
 def psi_to_chunks(definitions: list[PsiDefinition]) -> list[FileChunk]:
@@ -981,7 +1070,29 @@ def completions(request: TabbyCompletionRequest):
         if completion and is_pure_insertion_above_cursor(
             code_block, completion, relative_cursor
         ):
+            logger.info(
+                "is_pure_insertion_above_cursor blanked completion: "
+                "rel_cursor=%d completion=%r",
+                relative_cursor, completion[:100],
+            )
             completion = ""
+
+        # Extract the portion at/after the cursor position.
+        # The model outputs the updated code block from the prefill end,
+        # which includes the cursor line prefix and suffix lines.
+        # Strip both to return only the text inserted at the cursor.
+        if completion:
+            prefill = compute_prefill(code_block, relative_cursor, changes_above_cursor)
+            cursor_line_prefix = code_block[len(prefill):relative_cursor]
+            if cursor_line_prefix and completion.startswith(cursor_line_prefix):
+                completion = completion[len(cursor_line_prefix):]
+            # Strip suffix (code after cursor) from end of completion
+            suffix = code_block[relative_cursor:]
+            if suffix:
+                idx = completion.find(suffix)
+                if idx >= 0:
+                    completion = completion[:idx]
+
         return completion
 
     if request.segments is not None:

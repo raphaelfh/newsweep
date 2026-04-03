@@ -163,21 +163,36 @@ class TestPromptConstruction:
         assert "<|file_sep|>current/main.py:" in prompt
         assert "<|file_sep|>updated/main.py:" in prompt
 
-    def test_prev_section_matches_code_block(self):
-        """The 'original' section should be the code block without cursor marker."""
+    def test_prev_section_matches_code_block_with_changes(self):
+        """With recent_changes, the 'original' section should be the full code block."""
         cursor = REALISTIC_FILE.index("self._running = False")
         prompt, code_block, *_ = build_prompt(
             "main.py", REALISTIC_FILE, cursor, num_lines_before=2, num_lines_after=2,
+            recent_changes="some diff",
         )
-        # original section should contain the exact code block
         original_marker = "<|file_sep|>original/main.py:"
         current_marker = "<|file_sep|>current/main.py:"
         orig_start = prompt.index(original_marker) + len(original_marker)
-        # skip the ":start:end\n" part
         orig_start = prompt.index("\n", orig_start) + 1
         orig_end = prompt.index(current_marker)
         original_section = prompt[orig_start:orig_end].strip()
         assert original_section == code_block.strip()
+
+    def test_prev_section_truncated_without_changes(self):
+        """Without recent_changes, the 'original' section is truncated at cursor line
+        so the model sees a diff signal for pure insertions."""
+        cursor = REALISTIC_FILE.index("self._running = False")
+        prompt, code_block, block_start, rel_cursor = build_prompt(
+            "main.py", REALISTIC_FILE, cursor, num_lines_before=2, num_lines_after=2,
+        )
+        original_marker = "<|file_sep|>original/main.py:"
+        current_marker = "<|file_sep|>current/main.py:"
+        orig_start = prompt.index(original_marker) + len(original_marker)
+        orig_start = prompt.index("\n", orig_start) + 1
+        orig_end = prompt.index(current_marker)
+        original_section = prompt[orig_start:orig_end].strip()
+        # Original should be shorter than current (truncated at cursor)
+        assert len(original_section) < len(code_block.strip())
 
 
 # ---------------------------------------------------------------------------

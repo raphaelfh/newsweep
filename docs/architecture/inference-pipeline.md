@@ -11,7 +11,7 @@ prompt string
 [1] Tokenize
     |
     v
-[2] Token healing (detect unstable boundary, create logits processor)
+[2] Token healing + repetition penalty (logits processors)
     |
     v
 [3] KV cache reuse (find common prefix with previous request)
@@ -96,6 +96,7 @@ Regardless of the generation path, every produced token is checked for:
 1. **Stop tokens**: If the token is a stop token (EOS, `<|file_sep|>`, etc.), generation halts.
 2. **Request cancellation**: If `_request_seq > seq`, a newer request has arrived. Generation aborts and returns empty.
 3. **Early stop**: If the token matches the next expected token in the known suffix, a counter increments. After `EARLY_STOP_MATCH_TOKENS` consecutive matches, the remaining suffix is appended and generation stops. See [Early Cancellation](../deep-dives/early-cancellation.md).
+4. **Cycle detection**: If the last `2*W` generated tokens form two identical copies of a `W`-length pattern (for any W from 4 to `CYCLE_DETECT_WINDOW`), generation stops and the duplicate cycle is trimmed from the output. This is a safety net against repetition loops.
 
 ## Stage 5: Post-processing
 
@@ -104,9 +105,10 @@ The generated token IDs are decoded back to text, then:
 1. **Strip healing prefix**: If token healing was applied, the healing prefix is removed from the start of the completion (the IDE already has this text).
 2. **Trim at stop tokens**: Any stop token text found in the completion is used as a cut point.
 
-Back in the request handler, one final check:
+Back in the request handler, additional processing:
 
 3. **Pure insertion rejection**: If the completion only inserts text above the cursor line without editing it, the completion is discarded (returned as empty).
+4. **Cursor extraction**: The model outputs the full updated code from the prefill end. This includes the beginning of the cursor line (before the cursor position) and any suffix lines. Both are stripped so the returned completion contains only the text to be inserted at the cursor position.
 
 ## Metrics
 
