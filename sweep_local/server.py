@@ -439,7 +439,9 @@ def completions(request: TabbyCompletionRequest):
             )
             diff_store.seed_file(filepath, request.file_content)
             completion = generate(prompt, request.max_tokens, seq)
-            if completion and is_pure_insertion_above_cursor(code_block, completion, relative_cursor):
+            if completion and is_pure_insertion_above_cursor(
+                code_block, completion, relative_cursor
+            ):
                 completion = ""
         else:
             completion = generate(prefix, request.max_tokens, seq)

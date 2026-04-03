@@ -88,9 +88,7 @@ def is_pure_insertion_above_cursor(
     suffix_lines = code_block_lines[current_line_index:]
     suffix = "".join(suffix_lines)
 
-    if completion.startswith(prefix) and completion.endswith(cursor_line + suffix):
-        return True
-    return False
+    return completion.startswith(prefix) and completion.endswith(cursor_line + suffix)
 
 
 def build_prompt(
@@ -129,7 +127,7 @@ def build_prompt(
     block_start = max(0, cursor_line - num_lines_before)
     block_end = min(len(lines), cursor_line + num_lines_after + 1)
     code_block = "".join(lines[block_start:block_end])
-    block_start_index = sum(len(l) for l in lines[:block_start])
+    block_start_index = sum(len(line) for line in lines[:block_start])
 
     # Relative cursor position within code block
     relative_cursor = cursor_position - block_start_index

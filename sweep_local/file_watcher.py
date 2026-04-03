@@ -11,10 +11,11 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+from watchdog.events import FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from sweep_local.config import MAX_DIFFS_PER_FILE
+
 
 @dataclass
 class FileDiff:

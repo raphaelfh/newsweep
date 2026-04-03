@@ -1,8 +1,13 @@
 [project]
 name = "newsweep"
 version = "0.1.0"
-description = "Local next-edit autocomplete server for PyCharm via Tabby (MLX + Apple Silicon)"
+description = "Local next-edit autocomplete server for JetBrains IDEs via Tabby (MLX + Apple Silicon)"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
+authors = [
+    { name = "raphaelfh" },
+]
 dependencies = [
     "mlx-lm>=0.31.0",
     "fastapi>=0.110.0",
@@ -10,5 +15,28 @@ dependencies = [
     "watchdog>=4.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4.0",
+    "pre-commit>=3.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/raphaelfh/newsweep"
+Repository = "https://github.com/raphaelfh/newsweep"
+Issues = "https://github.com/raphaelfh/newsweep/issues"
+Changelog = "https://github.com/raphaelfh/newsweep/blob/main/CHANGELOG.md"
+
 [project.scripts]
 newsweep = "sweep_local.server:main"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,6 +1,10 @@
 # newsweep
 
-Local next-edit autocomplete server for PyCharm via [Tabby](https://tabby.tabbyml.com/), powered by [sweep-next-edit-v2-7B](https://huggingface.co/sweepai/sweep-next-edit-v2-7B) running on Apple Silicon with [MLX](https://github.com/ml-explore/mlx).
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Platform: macOS Apple Silicon](https://img.shields.io/badge/Platform-macOS%20Apple%20Silicon-black.svg)](https://support.apple.com/en-us/116943)
+
+Local next-edit autocomplete server for JetBrains IDEs via [Tabby](https://tabby.tabbyml.com/), powered by [sweep-next-edit-v2-7B](https://huggingface.co/sweepai/sweep-next-edit-v2-7B) running on Apple Silicon with [MLX](https://github.com/ml-explore/mlx).
 
 ## What it does
 
@@ -12,12 +16,40 @@ Key features:
 - **Speculative decoding** -- uses a small Qwen2.5-0.5B draft model for ~1.2x faster generation
 - **KV cache reuse** -- reuses computation across consecutive requests for lower latency
 - **Request cancellation** -- fast typing cancels in-flight requests so the server stays responsive
-- **Tabby-compatible API** -- works with the Tabby plugin for PyCharm (and other IDEs)
+- **Tabby-compatible API** -- works with the Tabby plugin for PyCharm (and other JetBrains IDEs)
+
+## How it works
+
+```
+ JetBrains IDE (Tabby plugin)
+        │
+        │  POST /v1/completions
+        ▼
+ ┌─────────────────────────────────────────────┐
+ │  newsweep server (FastAPI)                   │
+ │                                              │
+ │  1. File Watcher ──► tracks recent diffs     │
+ │  2. Prompt Builder ──► builds context from:  │
+ │     • code around cursor                     │
+ │     • recent changes (diffs)                 │
+ │     • file context                           │
+ │  3. MLX Inference ──► generates completion   │
+ │     • sweep-next-edit-v2-7B (main model)     │
+ │     • qwen2.5-0.5B (draft, speculative)      │
+ │     • KV cache reuse between requests        │
+ └─────────────────────────────────────────────┘
+```
+
+The server watches your project directory for file saves. When you edit code, recent diffs are recorded and injected into the model prompt as "recent changes" context. This allows the model to predict what you're likely to edit *next*, not just complete the current token.
+
+Speculative decoding runs a small draft model (Qwen2.5-0.5B) ahead of the main model, proposing candidate tokens that the main model verifies in batch. When the draft model guesses correctly (which is often for boilerplate), you get multiple tokens per forward pass.
 
 ## Requirements
 
 - macOS with Apple Silicon (M1/M2/M3/M4)
 - Python 3.12+
+- ~6 GB of disk space for models
+- ~8 GB of unified memory during inference
 
 ## Setup
 
@@ -147,29 +179,54 @@ Edit `sweep_local/config.py` to adjust:
 - `NUM_DRAFT_TOKENS` -- speculative decoding aggressiveness
 - `PROJECT_ROOT` -- directory to watch for file changes
 
+## Performance
+
+Typical performance on Apple Silicon (M2 Pro, 16 GB):
+
+| Metric | Value |
+|---|---|
+| First token latency | ~200-400 ms |
+| Generation speed | ~30-50 tokens/sec |
+| Memory usage | ~6-8 GB unified memory |
+| Cache hit rate | ~60-80% (consecutive edits) |
+
+Performance varies with model size, prompt length, and chip. Check real-time stats at `http://localhost:8741/v1/stats`.
+
+## Troubleshooting
+
+**Server won't start**
+- Ensure models are downloaded and placed in `models/sweep-next-edit-v2-7B-4bit` and `models/qwen2.5-0.5b-4bit`.
+- Check that Python 3.12+ is installed: `python --version`.
+- Check logs in `logs/stderr.log`.
+
+**No completions in the IDE**
+- Verify the server is running: `curl http://localhost:8741/v1/health`.
+- Check `~/.tabby/config.toml` points to `http://localhost:8741/v1`.
+- In JetBrains settings, make sure the Tabby endpoint is `http://localhost:8741`.
+- Restart the IDE after changing Tabby settings.
+
+**Slow completions**
+- Close memory-heavy applications to free unified memory.
+- Reduce `MAX_NEW_TOKENS` in `sweep_local/config.py` for shorter but faster completions.
+- Check `http://localhost:8741/v1/stats` for latency percentiles.
+
+**High memory usage**
+- The 7B model (4-bit) uses ~4 GB plus ~1 GB for the draft model. This is expected.
+- If memory is tight, you can disable speculative decoding by setting `DRAFT_MODEL_PATH = ""` in `sweep_local/config.py`.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Contributing
 
-Contributions are welcome! Here's how to get started:
-
-1. **Fork** the repository and create a feature branch from `main`.
-2. **Install** development dependencies:
-   ```bash
-   pip install -e .
-   ```
-3. **Make your changes** -- keep commits focused and well-described.
-4. **Test** your changes locally by running the server and verifying completions work.
-5. **Open a pull request** against `main` with a clear description of what you changed and why.
-
-### Guidelines
-
-- Follow existing code style and conventions.
-- Keep PRs small and focused on a single change.
-- Add or update docstrings for any new public functions.
-- If adding a new feature, update this README as needed.
-- Be respectful in discussions and code reviews.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
 
 For bugs or feature requests, please [open an issue](https://github.com/raphaelfh/newsweep/issues).
+
+## Acknowledgments
+
+- [SweepAI](https://github.com/sweepai) for the [sweep-next-edit-v2-7B](https://huggingface.co/sweepai/sweep-next-edit-v2-7B) model
+- [MLX](https://github.com/ml-explore/mlx) team at Apple for the ML framework and [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm)
+- [TabbyML](https://github.com/TabbyML/tabby) for the IDE plugin and completion protocol
+- [Qwen](https://github.com/QwenLM/Qwen2.5) team for the Qwen2.5-0.5B draft model
